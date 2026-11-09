@@ -1,0 +1,66 @@
+id = "mason/spotify-island"
+name = "Spotify Island"
+version = "1.0.2"
+plugin_api = 43
+author = "notoxus; local extensions by masonjacob"
+license = "MIT"
+dependencies = ["busctl", "spotify-quick-control"]
+tags = ["bar", "media", "panel", "service"]
+icon = "music"
+description = "Top-center now-playing island with artwork, transport controls, and automatic track-change previews."
+
+[[setting]]
+key = "auto_show"
+type = "bool"
+label_key = "settings.auto-show.label"
+description_key = "settings.auto-show.description"
+default = false
+
+[[setting]]
+key = "show_hours"
+type = "bool"
+label_key = "settings.show-hours.label"
+description_key = "settings.show-hours.description"
+default = false
+
+[[setting]]
+key = "title_limit"
+type = "int"
+label_key = "settings.title-limit.label"
+description_key = "settings.title-limit.description"
+default = 30
+min = 10
+max = 60
+step = 5
+
+[[setting]]
+key = "click_action"
+type = "string"
+label_key = "settings.click-action.label"
+description_key = "settings.click-action.description"
+default = "island"
+
+[[setting]]
+key = "audio_visualizer"
+type = "bool"
+label_key = "settings.audio-visualizer.label"
+description_key = "settings.audio-visualizer.description"
+default = false
+
+[[service]]
+id = "media-state"
+entry = "service.luau"
+
+[[widget]]
+id = "now-playing"
+entry = "bar.luau"
+
+[[panel]]
+id = "island"
+entry = "panel.luau"
+width = 420
+height = 500
+placement = "floating"
+position = "top_center"
+keyboard_focus = "on_demand"
+dismiss_on_outside_click = true
