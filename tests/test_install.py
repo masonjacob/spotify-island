@@ -56,6 +56,20 @@ members = ["clock", "notifications"]
         plugin = Path(os.environ['XDG_DATA_HOME']) / 'spotify-island/plugins/spotify-island/plugin.toml'
         self.assertEqual(tomllib.loads(plugin.read_text())['id'], cli.PLUGIN_ID)
 
+    def test_readonly_distribution_can_be_upgraded(self):
+        source = self.root / 'readonly/plugins'
+        plugin = source / 'spotify-island'
+        plugin.mkdir(parents=True)
+        manifest = plugin / 'plugin.toml'
+        manifest.write_text('id = "mason/spotify-island"\n')
+        manifest.chmod(0o444)
+        with patch.object(cli, 'call', return_value=self.exported_config()), patch.object(cli, 'plugin_source', return_value=source):
+            cli.register_plugin()
+            cli.register_plugin()
+        destination = Path(os.environ['XDG_DATA_HOME']) / 'spotify-island/plugins/spotify-island/plugin.toml'
+        self.assertEqual(destination.read_text(), manifest.read_text())
+        self.assertTrue(stat.S_IMODE(destination.stat().st_mode) & stat.S_IWUSR)
+
     def test_systemd_command_escaping(self):
         command = '/home/a user/100%/bin/spotify-island'
         cli.install_units(command)

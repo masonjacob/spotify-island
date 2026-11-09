@@ -5,7 +5,7 @@ let
   });
 in pkgs.python3Packages.buildPythonApplication {
   pname = "spotify-island";
-  version = "1.2.0";
+  version = "1.2.1";
   src = ../.;
   pyproject = true;
   build-system = [ pkgs.python3Packages.setuptools ];

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spotify-island"
-version = "1.2.0"
+version = "1.2.1"
 description = "Standalone Spotify Island helpers and Noctalia plugin"
 readme = "README.md"
 requires-python = ">=3.11"

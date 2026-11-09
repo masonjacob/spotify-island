@@ -81,7 +81,7 @@ unrelated keys. Use `--bar NAME --group NAME`, `--no-bar` for manual placement,
 or `--no-start` to write files without controlling services.
 
 The service reuses an existing Spotify session. When Spotify is absent, it starts
-the app. On Hyprland a per-launch workspace rule places a new window silently on
+the app. On Lua-based Hyprland (0.57+) a per-launch workspace rule places a new window silently on
 `special:spotify-island`; it does not modify compositor or Nix configuration.
 On other compositors, configure minimization through that compositor. Spotify's
 `--minimized` flag only works on Windows, so it is not used here.
@@ -126,7 +126,7 @@ spotify-island install --replace-legacy
 ```
 
 This explicitly retires `spotify-background.service`, `spotify-soloist-mpris.service`,
-`spotify-island-player.service` and `spotify-island-mpris.service` if active.
+`spotify-island-player.service` and `spotify-island-mpris.service` if active or enabled.
 Old Soloist keys/session files are preserved but are no longer read. The new
 application-owned service survives removal of the old Home Manager definitions.
 

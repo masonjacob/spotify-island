@@ -1,6 +1,6 @@
 id = "mason/spotify-island"
 name = "Spotify Island"
-version = "1.2.0"
+version = "1.2.1"
 plugin_api = 43
 author = "notoxus; local extensions by masonjacob"
 license = "MIT"

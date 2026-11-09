@@ -11,6 +11,7 @@ import socket
 import subprocess
 import sys
 import time
+import tempfile
 import tomllib
 
 import tomli_w
@@ -77,10 +78,25 @@ def register_plugin(bar="default", group="center", add_bar=True):
     sources = list(merged.get("plugins", {}).get("source", []))
     sources = [source for source in sources if source.get("name") != "spotify-island"]
     destination = xdg("XDG_DATA_HOME", ".local/share") / "spotify-island/plugins"
-    if destination.exists():
-        backup_dir = destination.with_name("plugins.backup-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ"))
-        shutil.copytree(destination, backup_dir)
-    shutil.copytree(plugin_source(), destination, dirs_exist_ok=True)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".plugins-", dir=destination.parent))
+    previous = None
+    try:
+        shutil.copytree(plugin_source(), staging, dirs_exist_ok=True)
+        for item in [staging, *staging.rglob("*")]:
+            item.chmod(0o755 if item.is_dir() else 0o644)
+        if destination.exists():
+            previous = destination.with_name("plugins.backup-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ"))
+            destination.rename(previous)
+        try:
+            staging.rename(destination)
+        except OSError:
+            if previous is not None:
+                previous.rename(destination)
+            raise
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
     sources.append({"name": "spotify-island", "kind": "path", "location": str(destination), "enabled": True})
     enabled = list(merged.get("plugins", {}).get("enabled", []))
     if PLUGIN_ID not in enabled:
@@ -119,8 +135,10 @@ def account_config():
 def install(args):
     command = str(Path(shutil.which("spotify-island") or sys.argv[0]).absolute())
     if not args.no_start:
-        active = [name for name in LEGACY_SERVICES if subprocess.run(
-            ["systemctl", "--user", "is-active", "--quiet", name], check=False).returncode == 0]
+        active = [name for name in LEGACY_SERVICES if any(subprocess.run(
+            ["systemctl", "--user", state, "--quiet", name], stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, check=False).returncode == 0
+            for state in ("is-active", "is-enabled"))]
         if active and not args.replace_legacy:
             raise ValueError("Old Spotify services are active. Use --replace-legacy to stop them during migration.")
         if active:
@@ -172,7 +190,7 @@ def hide_desktop():
     if not clients:
         raise ValueError("Automatic background placement currently requires Hyprland; minimize Spotify with your compositor")
     for client in clients:
-        call("hyprctl", "dispatch", "movetoworkspacesilent", "special:spotify-island,address:" + client["address"], stdout=subprocess.DEVNULL)
+        call("hyprctl", "eval", 'hl.dispatch(hl.dsp.window.move({ window = ' + json.dumps("address:" + client["address"]) + ', workspace = "special:spotify-island", follow = false }))', stdout=subprocess.DEVNULL)
 
 
 def show_desktop():
@@ -180,8 +198,8 @@ def show_desktop():
     if clients:
         workspace = json.loads(call("hyprctl", "activeworkspace", "-j", capture_output=True, text=True).stdout)["id"]
         for client in clients:
-            call("hyprctl", "dispatch", "movetoworkspacesilent", str(workspace) + ",address:" + client["address"], stdout=subprocess.DEVNULL)
-        call("hyprctl", "dispatch", "focuswindow", "address:" + clients[0]["address"], stdout=subprocess.DEVNULL)
+            call("hyprctl", "eval", 'hl.dispatch(hl.dsp.window.move({ window = ' + json.dumps("address:" + client["address"]) + ", workspace = " + str(workspace) + ", follow = false }))", stdout=subprocess.DEVNULL)
+        call("hyprctl", "eval", 'hl.dispatch(hl.dsp.focus({ window = ' + json.dumps("address:" + clients[0]["address"]) + " }))", stdout=subprocess.DEVNULL)
     else:
         call("busctl", "--user", "call", "org.mpris.MediaPlayer2.spotify", "/org/mpris/MediaPlayer2",
              "org.mpris.MediaPlayer2", "Raise")
@@ -199,7 +217,7 @@ def run_desktop():
         if not desktop_available():
             # Per-launch rule avoids changing the user's compositor/Nix configuration.
             if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") and shutil.which("hyprctl"):
-                call("hyprctl", "dispatch", "exec", "[workspace special:spotify-island silent] " + shlex.join(command), stdout=subprocess.DEVNULL)
+                call("hyprctl", "eval", "hl.exec_cmd(" + json.dumps(shlex.join(command), ensure_ascii=False) + ', { workspace = "special:spotify-island silent" })', stdout=subprocess.DEVNULL)
             else:
                 subprocess.Popen(command)
             for _ in range(30):
@@ -213,11 +231,12 @@ def run_desktop():
 
 def doctor():
     missing = []
-    for name in ("noctalia", "busctl", "systemctl", "spotify", "spotify_player", "notify-send"):
+    for name in ("noctalia", "busctl", "systemctl", "spotify", "notify-send"):
         found = shutil.which(name)
         print(f"{name}: {found or 'MISSING'}")
         if not found:
             missing.append(name)
+    print("spotify_player (optional library features): " + (shutil.which("spotify_player") or "not installed"))
     from .common import authorized
     print("Account token: " + ("available" if authorized() else "not configured or ambiguous"))
     return int(bool(missing))
