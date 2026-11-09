@@ -17,12 +17,13 @@ from dbus_next.constants import PropertyAccess
 from dbus_next.service import ServiceInterface, dbus_property, method, signal
 from websockets.asyncio.client import connect
 
+from .common import token_file
+
 
 class AccountAPI:
     """Account-wide state with token renewal and Retry-After backoff."""
     def __init__(self):
-        root = Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache')))
-        self.token_file = root / 'spotify-player/d420a117a32841c2b3474932e49fb54b_token.json'
+        self.token_file = None
         self.retry_at = 0
         self.lock = threading.Lock()
 
@@ -30,6 +31,7 @@ class AccountAPI:
         with self.lock:
             if time.monotonic() < self.retry_at:
                 raise OSError('Spotify account API is cooling down')
+            self.token_file = token_file()
             token = json.loads(self.token_file.read_text())
             for attempt in range(2):
                 request = Request('https://api.spotify.com/v1/' + path,
@@ -370,5 +372,9 @@ async def main():
     await asyncio.gather(player.watch(), player.watch_account())
 
 
-if __name__ == '__main__':
+def cli():
     asyncio.run(main())
+
+
+if __name__ == '__main__':
+    cli()

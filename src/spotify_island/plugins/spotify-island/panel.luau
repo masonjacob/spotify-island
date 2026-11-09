@@ -151,7 +151,14 @@ local function albumRow()
     return ui.column({ height = 80, gap = 8, align = "center", justify = "center" }, {
       ui.label({ text = "Sign in to show your saved albums", fontSize = 12, color = "on_surface_variant" }),
       ui.button({ text = "Connect Spotify", glyph = "brand-spotify", variant = "ghost", controlSize = "sm",
-        onClick = function() noctalia.runAsync({"alacritty", "-e", "spotify-background-setup"}) end }),
+        onClick = function()
+          noctalia.runAsync({"spotify-island", "setup-window"}, function(result)
+            if result.exitCode ~= 0 then
+              actionMessage = "Run spotify-island setup --account in a terminal, or set your terminal in spotify-island/config.toml."
+              render()
+            end
+          end)
+        end }),
     })
   end
   return ui.column({ height = 80, align = "center", justify = "center" }, {

@@ -7,5 +7,6 @@ https://github.com/noctalia-dev/community-plugins at revision
 Local changes: persistent idle/paused bar entry, larger popup, saved-album and
 Spotify Connect pickers, Like and Liked Songs actions, output-device shortcut,
 click-outside dismissal, and searchable Albums/Liked Songs/Devices views inside
-the island with inline action feedback. Authentication is handled by spotify_player;
-no tokens or credentials belong in this directory.
+the island with inline action feedback. Account authentication is handled by spotify_player; Soloist uses a separate
+API key for local playback. The standalone Python application owns setup and
+user services. No tokens or credentials belong in this directory.
