@@ -1,33 +1,50 @@
 # Spotify Island
 
-A standalone Noctalia plugin with a floating Spotify card, album artwork, seek
-and playback controls, saved albums, Liked Songs, and Spotify Connect devices.
-Derived from notoxus/media-island; upstream MIT attribution is preserved.
+A standalone Noctalia island that controls the official Spotify desktop app.
+Spotify handles playback on its currently selected Connect device: your computer,
+phone, Sonos speaker, or another device supported by the Spotify app. The island
+runs no audio engine and never automatically transfers playback to the computer.
 
-Spotify Island owns its runtime, user services and mutable Noctalia settings.
-It does not provide a NixOS or Home Manager module, and your system configuration
-must not import it. Installing/updating the application does not rebuild NixOS.
+## How it works
+
+```
+Island buttons → Linux MPRIS → official Spotify desktop → selected Connect device
+```
+
+The desktop app must be running and signed in. Play/pause, skip and seek go to
+its `org.mpris.MediaPlayer2.spotify` session. Album/track selections are passed
+to the app with `OpenUri`. Whether a particular remote-device operation is
+exposed through Linux MPRIS must be verified with that device; the fact that it
+works in Spotify's app does not guarantee every MPRIS method works remotely.
+
+Saved albums, Liked Songs, likes and the optional API device list use a separate
+Spotify account login through spotify_player. Basic playback controls do not
+require API credentials. The cast/Devices button opens the official app so you
+can use its complete Connect picker, including devices absent from the public
+Web API. Sonos devices marked `is_restricted` cannot receive public Web API
+commands; the native-client path is deliberately separate from that API.
+
+There is no Soloist dependency, API key, WebSocket player or custom MPRIS bridge.
+No NixOS or Home Manager module is provided. The application's own installer
+manages its runtime, user service and mutable Noctalia settings.
 
 ## Install on NixOS
 
-The standalone package includes Python dependencies, Soloist and a compatible
-spotify_player. It uses an independent user profile, not your system flake:
+Use a separate user profile; do not import this repository into your system flake:
 
 ```sh
 nix profile install --profile "$HOME/.local/share/spotify-island/profile" github:masonjacob/spotify-island
 mkdir -p "$HOME/.local/bin"
-for command in spotify-island spotify-quick-control spotify-background-setup spotify-island-mpris; do
+for command in spotify-island spotify-quick-control; do
   ln -s "$HOME/.local/share/spotify-island/profile/bin/$command" "$HOME/.local/bin/$command"
 done
 spotify-island install
 ```
 
-Keep `~/.local/bin` on the PATH inherited by Noctalia. The Nix package currently
-supports x86_64 Linux. Soloist is fetched directly from Spotify, never included in
-this repository or its releases. The standalone package permits this unfree
-dependency; no system-wide unfree setting is needed.
-
-To update this independent install:
+Keep `~/.local/bin` on Noctalia's PATH. The x86_64 Linux package supplies Spotify,
+a compatible spotify_player, Python and native command dependencies. It permits
+the unfree Spotify desktop dependency locally; no global Nix setting is needed.
+System rebuilds do not fetch or evaluate this application.
 
 ```sh
 nix profile upgrade --profile "$HOME/.local/share/spotify-island/profile" --all
@@ -36,127 +53,104 @@ spotify-island install
 
 ## Install on other Linux distributions
 
-Requires Python 3.11+, systemd user services, Noctalia plugin API 43+, `busctl`,
-`notify-send`, Spotify Soloist and `spotify_player` on PATH. Install the Python
-application in an isolated environment, for example from this checkout:
+Requires Python 3.11+, systemd user services, Noctalia API 43+, `busctl`,
+`notify-send` and the official Spotify desktop client. Install from a checkout:
 
 ```sh
 python3 -m venv "$HOME/.local/share/spotify-island/venv"
 "$HOME/.local/share/spotify-island/venv/bin/pip" install .
 mkdir -p "$HOME/.local/bin"
-for command in spotify-island spotify-quick-control spotify-background-setup spotify-island-mpris; do
+for command in spotify-island spotify-quick-control; do
   ln -s "$HOME/.local/share/spotify-island/venv/bin/$command" "$HOME/.local/bin/$command"
 done
-spotify-island doctor
 spotify-island install
 ```
 
-Python dependencies are installed from `pyproject.toml`. Native commands are
-external dependencies; pip does not download or install Soloist or spotify_player.
-Get Soloist from [Spotify's official downloads](https://developer.spotify.com/documentation/soloist/reference/downloads).
-The account integration is tested with spotify_player 0.25.1 plus the OAuth
-callback correction in `nix/spotify-player-oauth.patch`. Other distributions need
-a compatible build (or apply that patch when building spotify_player). That
-compatibility work is still required for a general distribution package; the
-Python runtime itself does not require Nix.
+For optional library/account features, install spotify_player on PATH too.
+It is tested at 0.25.1 with the OAuth callback correction in
+`nix/spotify-player-oauth.patch`; other distributions need a compatible build.
+Pip installs the Python dependencies, not native applications.
 
-## Setup
+## Setup and daily use
 
 The installer copies the plugin to `~/.local/share/spotify-island/plugins/`,
 registers it in Noctalia's mutable settings, adds its `spotify` widget after the
-clock in bar `default`, capsule group `center`, and installs two user services:
+clock in bar `default`, group `center`, and enables
+`spotify-island-desktop.service`. It backs up existing settings and preserves
+unrelated keys. Use `--bar NAME --group NAME`, `--no-bar` for manual placement,
+or `--no-start` to write files without controlling services.
 
-- `spotify-island-player.service`: optional headless Soloist playback.
-- `spotify-island-mpris.service`: exposes local and account playback to Noctalia.
-
-Use `--bar NAME --group NAME` for another layout or `--no-bar` to place the widget
-manually in Noctalia Settings. `--no-start` installs files without touching
-services. Existing Noctalia settings are backed up and unrelated keys preserved.
-
-Playback and account authorization are separate:
+The service reuses an existing Spotify session. When Spotify is absent, it starts
+the app. On Hyprland a per-launch workspace rule places a new window silently on
+`special:spotify-island`; it does not modify compositor or Nix configuration.
+On other compositors, configure minimization through that compositor. Spotify's
+`--minimized` flag only works on Windows, so it is not used here.
 
 ```sh
-spotify-island setup                 # enter your Soloist API key, then pair in Spotify Connect
-spotify-island setup --reset-key     # securely replace that key without deleting it first
-spotify-island setup --account       # browser authentication for library/remote controls
+spotify-island show      # sign in or choose your Sonos/other Connect device
+spotify-island hide      # return Spotify to the hidden Hyprland workspace
+spotify-island doctor
 ```
 
-Each person supplies their own Soloist key. Existing keys at
-`~/.config/spotify-soloist/api-key` are reused without copying them into the package.
-A Soloist key alone does not authorize saved albums, likes, or account controls.
-The account flow uses spotify_player's existing token cache; nothing reads a
-hardcoded account token filename. If the cache contains more than one token,
-set `spotify_token_file` explicitly.
+The service keeps Spotify available during the graphical session. Stopping the
+watcher does not terminate an app session that was already running. No playback
+or device transfer is triggered by startup or installation.
 
-Optional runtime preferences in `~/.config/spotify-island/config.toml`:
+Optional saved-album/like account authorization:
+
+```sh
+spotify-island setup
+```
+
+The card's Connect Spotify button opens this account flow in your configured
+terminal. This is separate from logging into the desktop app. Runtime preferences
+in `~/.config/spotify-island/config.toml`:
 
 ```toml
-# Include the terminal's flag for executing a command. No terminal is assumed.
 terminal = "alacritty -e"
-# Optional: select an account token if more than one exists.
+# spotify_command = ["spotify"]
 # spotify_token_file = "/home/you/.cache/spotify-player/CLIENT_ID_token.json"
-# soloist_command = "/path/to/soloist"
-# device_name = "My music computer"
 ```
 
-The card's Connect Spotify button opens account authentication in the configured
-terminal. Without a terminal preference, run `spotify-island setup --account`
-directly. Device name changes should be made before pairing. Avoid changing it
-while a local session is active.
+The account helper reuses an unambiguous spotify_player token cache, or the
+explicit file above. Tokens and desktop login sessions never enter this repository
+or a release. A developer-owned direct OAuth client is not implemented yet.
 
-## Migrate from the old Home Manager module
+## Migrate from an earlier version
 
-1. Remove the spotify-island input, module import, widget and inline services from
-   your Nix configuration. Build it to verify it no longer needs this repository.
-2. Install this standalone application into the separate user profile above.
-3. Run `spotify-island install --replace-legacy`. This explicitly disables/stops
-   the old `spotify-background.service` and `spotify-soloist-mpris.service` if they
-   are running, then starts the independent services. It preserves the API key.
-4. Apply your updated Home Manager configuration to retire its old managed files.
-   The standalone service names and mutable widget settings remain independent.
-
-Do not run the old and new media bridges simultaneously: they use the same MPRIS
-bus name to preserve compatibility with the island.
-
-## Diagnose
+Remove the old plugin input, Home Manager import and inline Spotify services from
+your system configuration. Install this application separately, then run:
 
 ```sh
-spotify-island doctor
+spotify-island install --replace-legacy
+```
+
+This explicitly retires `spotify-background.service`, `spotify-soloist-mpris.service`,
+`spotify-island-player.service` and `spotify-island-mpris.service` if active.
+Old Soloist keys/session files are preserved but are no longer read. The new
+application-owned service survives removal of the old Home Manager definitions.
+
+## Diagnose and develop
+
+```sh
+systemctl --user status spotify-island-desktop
+journalctl --user -u spotify-island-desktop
 spotify-quick-control snapshot --json
-systemctl --user status spotify-island-player spotify-island-mpris
-journalctl --user -u spotify-island-player -u spotify-island-mpris
-```
-
-`doctor` prints paths and whether credentials are present, never their contents.
-No key/account authentication is performed automatically by installation.
-
-## Development and community submission
-
-The canonical plugin lives in `src/spotify_island/plugins/spotify-island/` and
-ships in the Python wheel. Export a submission folder with:
-
-```sh
 spotify-island export-plugin /tmp/community-submission
 noctalia plugins lint /tmp/community-submission/spotify-island
 ```
 
-That folder includes its own user README, MIT license and English translations.
-Before a community PR, add an actual screenshot-based 960x540 `thumbnail.webp`,
-follow the upstream validator and test on a clean machine. This repository's Nix
-packaging is optional and is not part of the community plugin directory.
+The canonical plugin is `src/spotify_island/plugins/spotify-island/` and is included
+in the Python wheel. It has its own README, MIT license and English translations.
+Before submitting to community-plugins, add an actual screenshot-based 960x540
+`thumbnail.webp`, run upstream validation and test Sonos remote control explicitly.
 
-## Data and limitations
+The plugin and helpers invoke Noctalia, busctl, Spotify, systemctl, notify-send,
+optional spotify_player, and Hyprland's CLI where available. Artwork is downloaded
+and cached; optional library operations contact Spotify APIs and cache snapshots.
+The installer writes user units, plugin files and mutable settings with backups.
+No unreviewed remote code is downloaded/executed by the running plugin.
 
-The application shells out to Soloist, spotify_player, systemctl, Noctalia and
-notify-send. The plugin also invokes busctl. Local playback uses Soloist's
-loopback WebSocket. Account state is polled every five seconds when local
-playback is idle; account tokens may be refreshed. Artwork is downloaded from
-Spotify APIs/oEmbed and the Spotify image CDN and cached locally. Credentials
-remain outside the repository and Nix store, and are never part of a release.
-Soloist currently accepts its API key as a process argument.
-
-Restricted Spotify devices can expose playback but reject controls. Rate limits
-and account/API access restrictions still apply. Soloist builds expire and must
-be updated; see the official Spotify documentation. This update has automated
-installer tests and local service smoke tests; clean non-Nix distribution,
-account login and audible playback testing remain necessary before release.
+Installer and routing tests cover settings preservation and directing media URIs
+to the official app. They do not establish that Sonos hardware accepts the native
+client's remote commands; test play/pause, skip and seek with Sonos selected.

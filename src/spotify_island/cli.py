@@ -1,7 +1,6 @@
 """Install and manage Spotify Island in the user's account, independently of NixOS."""
 import argparse
 from datetime import datetime, timezone
-import getpass
 from importlib import resources
 import json
 import os
@@ -11,15 +10,16 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 import tomllib
 
 import tomli_w
 
-from .common import atomic_write, config_dir, device_name, key_file, settings, soloist_command, xdg
+from .common import atomic_write, config_dir, settings, xdg
 
 PLUGIN_ID = "mason/spotify-island"
-SERVICES = ("spotify-island-player.service", "spotify-island-mpris.service")
-LEGACY_SERVICES = ("spotify-background.service", "spotify-soloist-mpris.service")
+SERVICES = ("spotify-island-desktop.service",)
+LEGACY_SERVICES = ("spotify-background.service", "spotify-soloist-mpris.service", "spotify-island-player.service", "spotify-island-mpris.service")
 
 
 def call(*args, **kwargs):
@@ -42,8 +42,7 @@ def systemd_quote(value):
 def install_units(command):
     directory = xdg("XDG_CONFIG_HOME", ".config") / "systemd/user"
     for name, action, description in (
-        (SERVICES[0], "run-player", "Spotify Island Soloist playback"),
-        (SERVICES[1], "run-mpris", "Spotify Island media controls"),
+        (SERVICES[0], "run-desktop", "Spotify desktop controller for Spotify Island"),
     ):
         path = directory / name
         backup(path)
@@ -53,6 +52,7 @@ After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
+EnvironmentFile=-%t/uwsm/env_session.conf
 ExecStart={systemd_quote(command)} {action}
 Restart=on-failure
 RestartSec=5
@@ -89,7 +89,7 @@ def register_plugin(bar="default", group="center", add_bar=True):
     overrides.setdefault("widget", {})["spotify"] = {
         "type": PLUGIN_ID + ":now-playing",
         "actions": {"left": "panel-toggle " + PLUGIN_ID + ":island",
-                    "right": "media toggle", "middle": "panel-toggle control-center audio"},
+                    "right": "exec noctalia msg plugin mason/spotify-island:media-state all toggle", "middle": "exec spotify-island show"},
     }
     if add_bar:
         bar_config = merged.get("bar", {}).get(bar)
@@ -130,31 +130,15 @@ def install(args):
     register_plugin(args.bar, args.group, not args.no_bar)
     if not args.no_start:
         call("systemctl", "--user", "daemon-reload")
-        call("systemctl", "--user", "enable", SERVICES[1])
-        call("systemctl", "--user", "restart", SERVICES[1])
-        if key_file().is_file() and key_file().stat().st_size:
-            call("systemctl", "--user", "enable", SERVICES[0])
-            call("systemctl", "--user", "restart", SERVICES[0])
+        call("systemctl", "--user", "enable", SERVICES[0])
+        call("systemctl", "--user", "restart", SERVICES[0])
     print("Installed Spotify Island. No NixOS or Home Manager rebuild is required.")
 
 
-def setup(reset_key=False, account=False):
-    if account:
-        # This config belongs to the application, never to Home Manager.
-        directory = account_config()
-        call("spotify_player", "--config-folder", str(directory), "authenticate")
-        return
-    path = key_file()
-    if reset_key or not path.exists() or path.stat().st_size == 0:
-        key = getpass.getpass("Spotify Soloist API key: ").strip()
-        if not key:
-            raise ValueError("No key supplied; the existing key was preserved")
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        atomic_write(path, key + "\n")
-    path.chmod(0o600)
-    call("systemctl", "--user", "enable", SERVICES[0], SERVICES[1])
-    call("systemctl", "--user", "restart", SERVICES[0], SERVICES[1])
-    print("Select " + device_name() + " in Spotify Connect to pair it.")
+def setup():
+    directory = account_config()
+    call("spotify_player", "--config-folder", str(directory), "authenticate")
+    call("systemctl", "--user", "restart", SERVICES[0])
 
 
 def setup_window():
@@ -169,27 +153,71 @@ def setup_window():
     subprocess.Popen([*argv, command, "setup", "--account"], start_new_session=True)
 
 
-def run_player():
-    path = key_file()
-    if not path.is_file() or not path.stat().st_size:
-        print("Run spotify-island setup to enter your Soloist API key.", file=sys.stderr)
-        raise SystemExit(10)
-    binary = soloist_command()
-    executable = shutil.which(binary)
+
+def desktop_available():
+    return subprocess.run(["busctl", "--user", "get-property", "org.mpris.MediaPlayer2.spotify",
+                           "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2", "CanRaise"],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode == 0
+
+
+def hyprland_clients():
+    if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") or not shutil.which("hyprctl"):
+        return []
+    result = call("hyprctl", "clients", "-j", capture_output=True, text=True)
+    return [client for client in json.loads(result.stdout) if client.get("class", "").lower() == "spotify"]
+
+
+def hide_desktop():
+    clients = hyprland_clients()
+    if not clients:
+        raise ValueError("Automatic background placement currently requires Hyprland; minimize Spotify with your compositor")
+    for client in clients:
+        call("hyprctl", "dispatch", "movetoworkspacesilent", "special:spotify-island,address:" + client["address"], stdout=subprocess.DEVNULL)
+
+
+def show_desktop():
+    clients = hyprland_clients()
+    if clients:
+        workspace = json.loads(call("hyprctl", "activeworkspace", "-j", capture_output=True, text=True).stdout)["id"]
+        for client in clients:
+            call("hyprctl", "dispatch", "movetoworkspacesilent", str(workspace) + ",address:" + client["address"], stdout=subprocess.DEVNULL)
+        call("hyprctl", "dispatch", "focuswindow", "address:" + clients[0]["address"], stdout=subprocess.DEVNULL)
+    else:
+        call("busctl", "--user", "call", "org.mpris.MediaPlayer2.spotify", "/org/mpris/MediaPlayer2",
+             "org.mpris.MediaPlayer2", "Raise")
+
+
+def run_desktop():
+    command = settings().get("spotify_command", ["spotify"])
+    if not isinstance(command, list) or not command or not all(isinstance(item, str) and item for item in command):
+        raise ValueError("spotify_command must be a nonempty array of command arguments")
+    executable = shutil.which(command[0])
     if not executable:
-        raise ValueError("Install Spotify Soloist or set soloist_command in spotify-island/config.toml")
-    device = device_name()
-    os.execv(executable, [executable, "--device-name", device, "--api-key", path.read_text().strip(), "--ws", "127.0.0.1:0", "--cache-size", "512"])
+        raise ValueError("Spotify desktop is not installed; set spotify_command to its executable")
+    command = [executable, *command[1:]]
+    while True:
+        if not desktop_available():
+            # Per-launch rule avoids changing the user's compositor/Nix configuration.
+            if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") and shutil.which("hyprctl"):
+                call("hyprctl", "dispatch", "exec", "[workspace special:spotify-island silent] " + shlex.join(command), stdout=subprocess.DEVNULL)
+            else:
+                subprocess.Popen(command)
+            for _ in range(30):
+                time.sleep(1)
+                if desktop_available():
+                    break
+            else:
+                raise ValueError("Spotify did not expose its media session; run spotify-island show or open Spotify to sign in")
+        time.sleep(5)
 
 
 def doctor():
     missing = []
-    for name in ("noctalia", "busctl", "systemctl", "soloist", "spotify_player", "notify-send"):
-        found = shutil.which(settings().get("soloist_command", name) if name == "soloist" else name)
+    for name in ("noctalia", "busctl", "systemctl", "spotify", "spotify_player", "notify-send"):
+        found = shutil.which(name)
         print(f"{name}: {found or 'MISSING'}")
         if not found:
             missing.append(name)
-    print("Soloist key: " + ("saved" if key_file().is_file() and key_file().stat().st_size else "not configured"))
     from .common import authorized
     print("Account token: " + ("available" if authorized() else "not configured or ambiguous"))
     return int(bool(missing))
@@ -204,13 +232,13 @@ def main():
     install_parser.add_argument("--no-bar", action="store_true")
     install_parser.add_argument("--bar", default="default")
     install_parser.add_argument("--group", default="center")
-    setup_parser = sub.add_parser("setup", help="Enter Soloist key or authenticate Spotify account")
-    setup_parser.add_argument("--reset-key", action="store_true")
+    setup_parser = sub.add_parser("setup", help="Authenticate your Spotify account")
     setup_parser.add_argument("--account", action="store_true")
     sub.add_parser("setup-window", help="Open account authentication using configured terminal")
     sub.add_parser("doctor", help="Check dependencies without printing credentials")
-    sub.add_parser("run-player", help=argparse.SUPPRESS)
-    sub.add_parser("run-mpris", help=argparse.SUPPRESS)
+    sub.add_parser("run-desktop", help="Keep the official Spotify client available in the background")
+    sub.add_parser("show", help="Show Spotify to sign in or choose a Connect device")
+    sub.add_parser("hide", help="Return Spotify to the background on Hyprland")
     export = sub.add_parser("export-plugin", help="Copy plugin directory for community submission")
     export.add_argument("destination", type=Path)
     args = parser.parse_args()
@@ -218,14 +246,15 @@ def main():
         if args.action == "install":
             install(args)
         elif args.action == "setup":
-            setup(args.reset_key, args.account)
+            setup()
         elif args.action == "setup-window":
             setup_window()
-        elif args.action == "run-player":
-            run_player()
-        elif args.action == "run-mpris":
-            from .mpris import cli
-            cli()
+        elif args.action == "run-desktop":
+            run_desktop()
+        elif args.action == "show":
+            show_desktop()
+        elif args.action == "hide":
+            hide_desktop()
         elif args.action == "doctor":
             raise SystemExit(doctor())
         elif args.action == "export-plugin":
@@ -235,16 +264,6 @@ def main():
         print("Spotify Island: " + (str(error) if isinstance(error, ValueError) else type(error).__name__) + ". Run spotify-island doctor.", file=sys.stderr)
         raise SystemExit(1) from None
 
-
-def setup_main():
-    parser = argparse.ArgumentParser(description="Configure Spotify Soloist playback")
-    parser.add_argument("--reset-key", action="store_true")
-    args = parser.parse_args()
-    try:
-        setup(args.reset_key)
-    except (OSError, ValueError, subprocess.SubprocessError):
-        print("Setup failed. Run spotify-island doctor.", file=sys.stderr)
-        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

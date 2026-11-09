@@ -112,7 +112,7 @@ local function formatTime(microseconds)
 end
 
 local function outputControls()
-  noctalia.runAsync({"noctalia", "msg", "panel-open", "control-center", "audio"})
+  noctalia.runAsync({"spotify-island", "show"})
 end
 
 local function artwork(media)
@@ -217,7 +217,7 @@ render = function()
     -- Symmetric controls with the play/pause action as the main visual target.
     ui.row({ gap = 18, align = "center", justify = "center" }, {
       ui.button({ glyph = "cast", glyphSize = 22, variant = "ghost", width = 34, height = 40,
-        tooltip = "Speakers, headphones and volume", onClick = outputControls }),
+        tooltip = "Choose a playback device in Spotify", onClick = outputControls }),
       ui.button({ glyph = "player-skip-back-filled", glyphSize = 26, variant = "ghost", width = 40, height = 44,
         enabled = controllable and media.canGoPrevious ~= false, tooltip = "Previous track", onClick = function() request("previous") end }),
       ui.column({ width = 56, height = 56, radius = 28, fill = "primary", align = "center", justify = "center",
@@ -237,7 +237,7 @@ render = function()
       ui.button({ text = "Liked songs", glyph = "heart", variant = "ghost", controlSize = "sm",
         onClick = function() openMenu("liked") end }),
       ui.button({ text = "Devices", glyph = "devices", variant = "ghost", controlSize = "sm",
-        onClick = function() openMenu("devices") end }),
+        onClick = outputControls }),
     }),
     ui.label({ text = actionMessage, fontSize = 11, color = "on_surface_variant", maxWidth = 372, maxLines = 3 }),
   }))

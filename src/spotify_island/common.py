@@ -20,11 +20,6 @@ def settings():
     return tomllib.loads(path.read_text()) if path.exists() else {}
 
 
-def key_file():
-    # Preserve the established key location so upgrading does not require reentry.
-    return xdg("XDG_CONFIG_HOME", ".config") / "spotify-soloist/api-key"
-
-
 def token_file():
     configured = settings().get("spotify_token_file")
     if configured:
@@ -55,10 +50,3 @@ def atomic_write(path, content, mode=0o600):
     finally:
         Path(temporary).unlink(missing_ok=True)
 
-
-def device_name():
-    return settings().get("device_name", "Noctalia " + socket.gethostname().split(".")[0].capitalize())
-
-
-def soloist_command():
-    return settings().get("soloist_command", "soloist")

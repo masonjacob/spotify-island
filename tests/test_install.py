@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from spotify_island import cli, control
-from spotify_island.common import atomic_write, config_dir, key_file, token_file
+from spotify_island.common import atomic_write, config_dir, token_file
 
 
 class InstallationTests(unittest.TestCase):
@@ -60,17 +60,16 @@ members = ["clock", "notifications"]
         command = '/home/a user/100%/bin/spotify-island'
         cli.install_units(command)
         unit = Path(os.environ['XDG_CONFIG_HOME']) / 'systemd/user' / cli.SERVICES[0]
-        self.assertIn('ExecStart="/home/a user/100%%/bin/spotify-island" run-player', unit.read_text())
+        self.assertIn('ExecStart="/home/a user/100%%/bin/spotify-island" run-desktop', unit.read_text())
 
-    def test_reset_key_is_private_and_blank_input_preserves_old_key(self):
-        atomic_write(key_file(), 'old-key\n')
-        with patch('getpass.getpass', return_value='new-key'), patch.object(cli, 'call'):
-            cli.setup(reset_key=True)
-        self.assertEqual(key_file().read_text(), 'new-key\n')
-        self.assertEqual(stat.S_IMODE(key_file().stat().st_mode), 0o600)
-        with patch('getpass.getpass', return_value=''), self.assertRaises(ValueError):
-            cli.setup(reset_key=True)
-        self.assertEqual(key_file().read_text(), 'new-key\n')
+    def test_album_playback_is_delegated_to_official_spotify(self):
+        with patch.object(control, 'run', return_value='') as run, patch.object(control, 'spotify') as api:
+            control.play_album('A' * 22)
+            api.assert_not_called()
+            run.assert_called_once_with(['busctl', '--user', 'call', 'org.mpris.MediaPlayer2.spotify',
+                '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2', 'OpenUri', 's', 'spotify:album:' + 'A' * 22])
+        with self.assertRaises(ValueError):
+            control.play_track('not a Spotify ID')
 
     def test_token_requires_unambiguous_selection(self):
         cache = Path(os.environ['XDG_CACHE_HOME']) / 'spotify-player'

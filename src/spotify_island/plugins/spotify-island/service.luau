@@ -1,5 +1,5 @@
 --!nonstrict
--- Poll Noctalia's selected MPRIS player, publish a shared snapshot, and show
+-- Follow the official Spotify desktop client, publish a shared snapshot, and show
 -- the floating island briefly when playback starts or the track changes.
 
 local PANEL_ID = "mason/spotify-island:island"
@@ -190,7 +190,7 @@ local function handleQuery(result)
   local fields = nil
   if type(decoded) == "table" and type(decoded.data) == "table" and type(decoded.data[1]) == "table" then
     for _, candidate in ipairs(decoded.data[1]) do
-      if field(candidate, "bus_name", "") == "org.mpris.MediaPlayer2.spotify_soloist" then
+      if field(candidate, "bus_name", "") == "org.mpris.MediaPlayer2.spotify" then
         fields = candidate
         break
       end
@@ -278,7 +278,7 @@ local function runMediaCommand(action)
     "dev.noctalia.Mpris",
     method,
     "s",
-    currentPlayer and currentPlayer.busName or "org.mpris.MediaPlayer2.spotify_soloist",
+    currentPlayer and currentPlayer.busName or "org.mpris.MediaPlayer2.spotify",
   })
 end
 

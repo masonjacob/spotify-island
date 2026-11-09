@@ -11,7 +11,7 @@ import subprocess
 import socket
 import sys
 
-from .common import authorized, config_dir, device_name, soloist_command, token_file
+from .common import authorized, config_dir, token_file
 
 
 def run(args, **kwargs):
@@ -65,35 +65,17 @@ def pick(rows, prompt):
     return rows.get(result.stdout.rstrip("\n")) if result.returncode == 0 else None
 
 
-def ensure_playback_device():
-    devices = json.loads(spotify("get", "key", "devices"))
-    if any(d.get("is_active") for d in devices):
-        return
-    local_name = device_name()
-    local = next((d for d in devices if d.get("name") == local_name and d.get("id")), None)
-    if local:
-        spotify("connect", "--id", str(local["id"]))
+def native_open(kind, identifier):
+    if kind not in {"album", "track"} or not identifier or not re.fullmatch(r"[A-Za-z0-9]{22}", identifier):
+        raise ValueError("Invalid Spotify URI")
+    # Spotify itself owns routing to the selected Connect device.
+    run(["busctl", "--user", "call", "org.mpris.MediaPlayer2.spotify",
+         "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2", "OpenUri", "s",
+         "spotify:" + kind + ":" + identifier])
 
 
 def play_album(identifier):
-    if not identifier or not re.fullmatch(r"[A-Za-z0-9]{22}", identifier):
-        raise ValueError("Invalid album ID")
-    playback = json.loads(spotify("get", "key", "playback"))
-    device = (playback or {}).get("device") or {}
-    local_name = device_name()
-    if device and device.get("name") != local_name:
-        if device.get("is_restricted"):
-            notify("Spotify restricts controls on “" + clean(device.get("name", "this device")) + "”. Use Spotify or Sonos to start this album there.")
-            return
-        spotify("playback", "start", "context", "album", "--id", identifier)
-        return
-    status = run([soloist_command(), "ctl", "status"])
-    if not re.search(r"^\s*logged in:\s*yes\s*$", status, re.MULTILINE):
-        name = device_name()
-        notify("First select “" + name + "” in Spotify’s Connect/device picker and play a track to pair Soloist. Then try the album again.")
-        return
-    run([soloist_command(), "ctl", "activate"])
-    run([soloist_command(), "ctl", "play", "spotify:album:" + identifier])
+    native_open("album", identifier)
 
 
 def album_cover(album, cache):
@@ -191,33 +173,15 @@ def menu_items(action):
 
 
 def play_track(identifier):
-    if not identifier or not re.fullmatch(r"[A-Za-z0-9]{22}", identifier):
-        raise ValueError("Invalid track ID")
-    playback = json.loads(spotify("get", "key", "playback"))
-    device = (playback or {}).get("device") or {}
-    local_name = device_name()
-    if device and device.get("name") != local_name:
-        if device.get("is_restricted"):
-            notify("Spotify restricts playback on “" + clean(device.get("name", "this speaker")) +
-                   "”. Choose another device here, or start playback in Spotify/Sonos.")
-            return
-        spotify("playback", "start", "track", "--id", identifier)
-        return
-    status = run([soloist_command(), "ctl", "status"])
-    if not re.search(r"^\s*logged in:\s*yes\s*$", status, re.MULTILINE):
-        notify("First select “" + local_name + "” in Spotify’s device picker and play a track to pair it.")
-        return
-    run([soloist_command(), "ctl", "activate"])
-    run([soloist_command(), "ctl", "play", "spotify:track:" + identifier])
+    native_open("track", identifier)
 
 
 def main(action, identifier=None):
     if action == "snapshot":
         return library_snapshot()
-    if action != "play-album" and not authorized():
-        notify("Your Spotify library needs API authorization; playback uses Soloist independently.")
+    if action not in {"play-album", "play-track"} and not authorized():
+        notify("Sign in to your Spotify account to access playback and your library.")
         raise ValueError("Spotify account authorization required")
-    run(["systemctl", "--user", "start", "spotify-island-player.service"])
     if action in ("list-albums", "list-liked", "list-devices"):
         return menu_items(action)
     if action == "play-track":
@@ -238,26 +202,10 @@ def main(action, identifier=None):
     elif action == "play-album":
         play_album(identifier)
     elif action == "liked":
-        playback = json.loads(spotify("get", "key", "playback"))
-        device = (playback or {}).get("device") or {}
-        if device.get("is_restricted"):
-            notify("Spotify restricts playback on “" + clean(device.get("name", "this speaker")) +
-                   "”. Choose another device, or start playback in Spotify/Sonos.")
-            return
-        ensure_playback_device()
-        spotify("playback", "start", "liked")
+        run(["busctl", "--user", "call", "org.mpris.MediaPlayer2.spotify", "/org/mpris/MediaPlayer2",
+             "org.mpris.MediaPlayer2", "OpenUri", "s", "spotify:collection:tracks"])
     elif action == "devices":
-        devices = json.loads(spotify("get", "key", "devices"))
-        rows = rows_for([d for d in devices if not d.get("is_restricted")], "device")
-        playback = json.loads(spotify("get", "key", "playback"))
-        current = (playback or {}).get("device") or {}
-        if current.get("is_restricted"):
-            rows[clean(current.get("name", "Current speaker")) + "\tPlaying device · Spotify API restricted"] = "restricted:current"
-        device = pick(rows, "Spotify devices (some speakers require Sonos)")
-        if device == "restricted:current":
-            notify("Spotify reports this speaker as restricted and provides no controllable device ID. Use Spotify/Sonos, or a direct Sonos connection on the same network.")
-        elif device:
-            spotify("connect", "--id", device)
+        run(["spotify-island", "show"])
     else:
         raise ValueError("Unknown Spotify action")
 
@@ -275,8 +223,8 @@ def cli():
             print(json.dumps({"ok": True, "message": " ".join(MESSAGES), **(result or {})}))
         elif result is not None:
             print(json.dumps(result))
-    except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError):
-        message = "The request failed. Check your Spotify authorization, network, and playback device."
+    except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError) as error:
+        message = str(error) if isinstance(error, ValueError) and not isinstance(error, json.JSONDecodeError) else "The request failed. Check your Spotify authorization, network, and playback device."
         if INLINE:
             print(json.dumps({"ok": False, "message": message}))
         else:

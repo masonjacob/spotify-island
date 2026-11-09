@@ -14,10 +14,10 @@ saved albums, Liked Songs and Connect device selection.
 
 Install the standalone [Spotify Island helpers](https://github.com/masonjacob/spotify-island)
 first. Required external commands are `busctl`, `spotify-quick-control` and
-`spotify-island`. The helpers manage Soloist playback and a media bridge, and use
-spotify_player for account actions. Installation instructions cover NixOS and a
-Python virtual environment. Local playback requires your own Soloist API key;
-library/remote features require separate Spotify account authorization.
+`spotify-island`. The helpers keep the official Spotify desktop app available in the background
+and use optional spotify_player for account/library actions. Installation instructions cover NixOS and a
+Python virtual environment. Playback controls use the desktop app's current Spotify Connect device.
+Optional library features require separate Spotify account authorization.
 
 ## Usage
 
@@ -39,14 +39,13 @@ Use the card for playback, seeking, Like, Albums, Liked Songs, Devices and syste
 audio outputs. An idle Music button stays visible before playback starts.
 
 ```sh
+spotify-island show
+spotify-island hide
 spotify-island setup
-spotify-island setup --account
-spotify-island setup --reset-key
 ```
 
 Configure your preferred terminal in `spotify-island/config.toml` for the card's
-Connect Spotify button. The button opens account authentication; it does not
-replace the Soloist key. CLI setup works without a terminal preference.
+Connect Spotify button. The button opens account authentication; it is separate from signing into the desktop app. CLI setup works without a terminal preference.
 
 ## Settings
 
@@ -69,11 +68,13 @@ noctalia msg plugin mason/spotify-island:island all page devices
 
 ## Notes
 
-The widget targets the `org.mpris.MediaPlayer2.spotify_soloist` media bridge.
+The widget targets the `org.mpris.MediaPlayer2.spotify` media bridge.
 Commands run through the standalone helpers; seek requests also invoke busctl.
 Artwork is downloaded and cached in plugin data; helpers cache library and album
 artwork. Account actions contact Spotify APIs and may refresh stored tokens.
-The API key, account tokens and Soloist sessions are kept outside the plugin.
+Account tokens and the desktop login session are kept outside the plugin.
 The helpers' README lists service names, paths, installation and account limits.
-Restricted devices may display playback while disabling unsupported controls.
+The cast/Devices button opens Spotify's full Connect picker. Basic playback
+controls target the official client through MPRIS, not the public Web API.
+Remote control support through Linux MPRIS needs verification with your device.
 Derived from notoxus/media-island; see LICENSE and UPSTREAM.md.

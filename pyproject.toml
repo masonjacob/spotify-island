@@ -4,18 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spotify-island"
-version = "1.1.0"
+version = "1.2.0"
 description = "Standalone Spotify Island helpers and Noctalia plugin"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-dependencies = ["dbus-next>=0.2.3", "websockets>=14", "tomli-w>=1.0"]
+dependencies = ["tomli-w>=1.0"]
 
 [project.scripts]
 spotify-island = "spotify_island.cli:main"
 spotify-quick-control = "spotify_island.control:cli"
-spotify-background-setup = "spotify_island.cli:setup_main"
-spotify-island-mpris = "spotify_island.mpris:cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
